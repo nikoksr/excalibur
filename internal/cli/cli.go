@@ -117,7 +117,7 @@ func NewApp(version string, runner RunFn) *cli.Command {
 
 			// --- Validate Configuration ---
 			logger.Debug("Validating configuration...")
-			if err := config.Validate(ctx, appConfig, logger); err != nil {
+			if err := config.Validate(ctx, normalizedCfg, logger); err != nil {
 				logger.Error("Configuration validation failed", slog.String("error", err.Error()))
 				return fmt.Errorf("validate configuration: %w", err)
 			}
