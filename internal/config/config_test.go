@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"flag"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -121,8 +122,17 @@ func TestLoad(t *testing.T) {
 				config.EnvReportQueriesDir:       dummyQueriesDir,
 				config.EnvReportOutputPath:       dummyOutputPath,
 			},
-			expectErr:            true,
-			expectedErrSubstring: "invalid duration format",
+			expectErr: false, // We fall back to the default timeout
+			expectedCfg: config.Config{
+				DataSource: datasource.Config{DSN: "postgres://user:pass@host:5432/db"},
+				Report: report.Config{
+					TemplatePath:        dummyTemplatePath,
+					DataSourceRefColumn: "B",
+					QueriesDir:          dummyQueriesDir,
+					OutputPath:          dummyOutputPath,
+					Timeout:             config.DefaultReportTimeout, // Default applied
+				},
+			},
 		},
 		{
 			name: "Invalid Duration Format in Flag",
@@ -148,10 +158,12 @@ func TestLoad(t *testing.T) {
 		},
 	}
 
+	mutedSlog := slog.New(slog.DiscardHandler)
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			getenv := mockGetenv(tc.env)
-			cfg, err := config.Load(tc.args, getenv)
+			cfg, err := config.Load(tc.args, getenv, mutedSlog)
 
 			if tc.expectErr {
 				require.Error(t, err, "Expected an error but got none")
@@ -231,7 +243,7 @@ func TestValidate(t *testing.T) {
 				return c
 			}(),
 			expectErr:            true,
-			expectedErrSubstring: "report.template_path: path does not exist",
+			expectedErrSubstring: "report.template_path: path error",
 		},
 		{
 			name: "Missing Queries Dir",
@@ -251,7 +263,7 @@ func TestValidate(t *testing.T) {
 				return c
 			}(),
 			expectErr:            true,
-			expectedErrSubstring: "report.queries_dir: path does not exist",
+			expectedErrSubstring: "report.queries_dir: path error",
 		},
 		{
 			name: "Missing Output Path",
@@ -291,7 +303,7 @@ func TestValidate(t *testing.T) {
 				return c
 			}(),
 			expectErr:            true,
-			expectedErrSubstring: "report.timeout: must be greater than 0",
+			expectedErrSubstring: "report.timeout: must be a positive duration",
 		},
 		{
 			name: "Multiple Errors",
@@ -304,9 +316,11 @@ func TestValidate(t *testing.T) {
 		},
 	}
 
+	mutedSlog := slog.New(slog.DiscardHandler)
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := config.Validate(t.Context(), tc.cfg)
+			err := config.Validate(t.Context(), tc.cfg, mutedSlog)
 
 			if tc.expectErr {
 				require.Error(t, err, "Expected an error but got none")
@@ -429,9 +443,11 @@ func TestNormalize(t *testing.T) {
 		},
 	}
 
+	mutedSlog := slog.New(slog.DiscardHandler)
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			normalizedCfg, err := config.Normalize(tc.cfg)
+			normalizedCfg, err := config.Normalize(tc.cfg, mutedSlog)
 
 			if tc.expectErr {
 				require.Error(t, err, "Expected an error but got none")

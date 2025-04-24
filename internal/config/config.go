@@ -5,6 +5,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,11 +19,10 @@ import (
 )
 
 type Config struct {
-	DataSource datasource.Config // Configuration for the data source (e.g., postgres).
-	Report     report.Config     // Configuration for report generation.
+	DataSource datasource.Config
+	Report     report.Config
 }
 
-// --- Constants for Environment Variable Names ---.
 const (
 	EnvPrefix = "EXCALIBUR_"
 
@@ -35,92 +37,102 @@ const (
 
 const (
 	DefaultReportTimeout    = 5 * time.Minute
-	DefaultReportRefColumn  = "R"
-	DefaultReportQueriesDir = "queries"
+	DefaultReportRefColumn  = "R"       // Default Excel column for datasource references.
+	DefaultReportQueriesDir = "queries" // Default relative directory for SQL files.
 	DefaultReportOutputPath = "excalibur_report.xlsx"
 )
 
-func Load(args []string, getenv func(string) string) (Config, error) {
+func Load(args []string, getenv func(string) string, logger *slog.Logger) (Config, error) {
 	assert.Assert(args != nil, "args must not be nil")
 	assert.Assert(getenv != nil, "getenv must not be nil")
+	assert.Assert(logger != nil, "logger must not be nil")
 
-	// Initialize with zero values or potential hardcoded defaults
 	cfg := Config{
 		Report: report.Config{
-			Timeout: DefaultReportTimeout,
+			Timeout:             DefaultReportTimeout,
+			DataSourceRefColumn: DefaultReportRefColumn,
+			QueriesDir:          DefaultReportQueriesDir,
+			OutputPath:          DefaultReportOutputPath,
 		},
 	}
 
+	// Use a dedicated flag set to avoid interfering with the global one (e.g., -verbose).
 	fs := flag.NewFlagSet("excalibur", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
 
-	// --- Register Flags (as before) ---
-	fs.StringVar(
-		&cfg.DataSource.DSN,
-		"dsn",
-		getenvOrDefault(getenv, EnvDSN, ""),
-		"[REQUIRED] DSN for the data source (e.g., postgres).",
-	)
-	fs.StringVar(
-		&cfg.Report.TemplatePath,
-		"report-template-path",
-		getenvOrDefault(getenv, EnvReportTemplatePath, ""),
-		"[REQUIRED] Path to the report template file.",
-	)
+	// --- Register Flags ---
+
+	// DataSource Flags
+	fs.StringVar(&cfg.DataSource.DSN, "dsn", getenvOrDefault(getenv, EnvDSN, ""),
+		"DSN for the data source (e.g., postgresql://user:pass@host:port/db). (Env: "+EnvDSN+")")
+
+	// Report Flags
+	fs.StringVar(&cfg.Report.TemplatePath, "report-template-path", getenvOrDefault(getenv, EnvReportTemplatePath, ""),
+		"Path to the input Excel template file (.xlsx). (Env: "+EnvReportTemplatePath+")")
 	fs.StringVar(
 		&cfg.Report.DataSourceRefColumn,
 		"report-ref-col",
 		getenvOrDefault(getenv, EnvReportDataSourceRefCol, DefaultReportRefColumn),
-		"Name of the Excel column that contains the data source reference.",
+		fmt.Sprintf("Excel column containing the SQL file reference (e.g., 'Q'). (Env: %s)", EnvReportDataSourceRefCol),
 	)
 	fs.StringVar(
 		&cfg.Report.QueriesDir,
 		"report-queries-dir",
 		getenvOrDefault(getenv, EnvReportQueriesDir, DefaultReportQueriesDir),
-		"Path to the directory containing SQL queries for the report.",
+		"Directory containing SQL query files, relative to the template or absolute. (Env: "+EnvReportQueriesDir+")",
 	)
 	fs.StringVar(
 		&cfg.Report.OutputPath,
 		"report-output-path",
 		getenvOrDefault(getenv, EnvReportOutputPath, DefaultReportOutputPath),
-		"Path to the output report file.",
+		"Path where the generated Excel report will be saved. (Env: "+EnvReportOutputPath+")",
 	)
 
-	// Handle duration parsing carefully (still belongs in Load as it's parsing input)
+	// Report Timeout Flag (Duration)
+	// Parse env var first, fallback to default, then register flag using that as the flag's default.
 	defaultTimeoutStr := DefaultReportTimeout.String()
-	envTimeout := getenvOrDefault(getenv, EnvReportTimeout, defaultTimeoutStr)
-	parsedTimeout, err := time.ParseDuration(envTimeout)
+	envTimeoutStr := getenvOrDefault(getenv, EnvReportTimeout, defaultTimeoutStr)
+	parsedTimeoutFromEnv, err := time.ParseDuration(envTimeoutStr)
 	if err != nil {
-		return Config{}, fmt.Errorf(
-			"invalid duration format for report timeout (%s=%q): %w",
-			EnvReportTimeout,
-			envTimeout,
-			err,
+		logger.Warn(
+			"Invalid duration format in environment variable, using default",
+			slog.String("env_var", EnvReportTimeout),
+			slog.String("value", envTimeoutStr),
+			slog.String("default", defaultTimeoutStr),
+			slog.String("error", err.Error()),
 		)
+		parsedTimeoutFromEnv = DefaultReportTimeout // Fallback
 	}
-	fs.DurationVar(
-		&cfg.Report.Timeout,
-		"report-timeout",
-		parsedTimeout,
-		"Timeout for report generation. Default is 5 minutes.",
-	)
+	fs.DurationVar(&cfg.Report.Timeout, "report-timeout", parsedTimeoutFromEnv,
+		fmt.Sprintf("Maximum duration for report generation (e.g., '5m', '1h30m'). (Env: %s)", EnvReportTimeout))
 
-	// --- Parse the arguments ---
+	// --- Parse ---
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return Config{}, err
+			// Print usage if help was requested.
+			fmt.Fprintf(os.Stderr, "Usage of Excalibur:\n")
+			fs.PrintDefaults()
+			return Config{}, flag.ErrHelp // Propagate ErrHelp for clean exit in main
 		}
-		return Config{}, fmt.Errorf("error parsing flags: %w", err)
+		logger.Error("Error parsing command-line flags", slog.String("error", err.Error()))
+		return Config{}, fmt.Errorf("parsing flags: %w", err)
 	}
 
-	// --- Post-processing (Simple transformations like ToUpper belong here) ---
+	// --- Post-processing ---
+	// Ensure consistent case for column comparison later.
 	cfg.Report.DataSourceRefColumn = strings.ToUpper(cfg.Report.DataSourceRefColumn)
+	logger.Debug("Configuration loaded (raw)", slog.Any("config", cfg))
 
 	return cfg, nil
 }
 
-func Validate(ctx context.Context, cfg Config) error {
-	validationProblems := make(map[string]string)
+func Validate(ctx context.Context, cfg Config, logger *slog.Logger) error {
+	assert.Assert(ctx != nil, "context must not be nil")
+	assert.Assert(logger != nil, "logger must not be nil")
 
+	logger.Debug("Validating configuration rules...")
+
+	validationProblems := make(map[string]string)
 	datasourceProblems := cfg.DataSource.Valid(ctx)
 	for key, problem := range datasourceProblems {
 		validationProblems["datasource."+key] = problem
@@ -136,42 +148,71 @@ func Validate(ctx context.Context, cfg Config) error {
 		errBuilder.WriteString("invalid configuration:")
 		for key, problem := range validationProblems {
 			errBuilder.WriteString(fmt.Sprintf("\n - %s: %s", key, problem))
+			logger.Debug("Validation issue", slog.String("field", key), slog.String("problem", problem))
 		}
 		return errors.New(errBuilder.String())
 	}
 
+	logger.Debug("Configuration validation successful.")
 	return nil
 }
 
-func Normalize(cfg Config) (Config, error) {
-	normalizedCfg := cfg
+func Normalize(cfg Config, logger *slog.Logger) (Config, error) {
+	assert.Assert(logger != nil, "logger must not be nil")
 
-	// Normalize paths to be absolute
-	absTemplatePath, err := filepath.Abs(normalizedCfg.Report.TemplatePath)
+	logger.Debug("Normalizing configuration paths...")
+
+	normalizedCfg := cfg // Operate on a copy
+
+	var err error
+	normalizedCfg.Report.TemplatePath, err = makeAbsolutePath(
+		normalizedCfg.Report.TemplatePath,
+		"template path",
+		logger,
+	)
 	if err != nil {
-		return Config{}, fmt.Errorf("normalize template path %q: %w", normalizedCfg.Report.TemplatePath, err)
+		return Config{}, err
 	}
-	normalizedCfg.Report.TemplatePath = absTemplatePath
 
-	absOutputPath, err := filepath.Abs(normalizedCfg.Report.OutputPath)
+	normalizedCfg.Report.OutputPath, err = makeAbsolutePath(normalizedCfg.Report.OutputPath, "output path", logger)
 	if err != nil {
-		return Config{}, fmt.Errorf("normalize output path %q: %w", normalizedCfg.Report.OutputPath, err)
+		return Config{}, err
 	}
-	normalizedCfg.Report.OutputPath = absOutputPath
 
-	absQueriesDir, err := filepath.Abs(normalizedCfg.Report.QueriesDir)
+	normalizedCfg.Report.QueriesDir, err = makeAbsolutePath(
+		normalizedCfg.Report.QueriesDir,
+		"queries directory",
+		logger,
+	)
 	if err != nil {
-		return Config{}, fmt.Errorf("normalize queries dir %q: %w", normalizedCfg.Report.QueriesDir, err)
+		return Config{}, err
 	}
-	normalizedCfg.Report.QueriesDir = absQueriesDir
 
+	logger.Debug("Configuration normalization successful.")
 	return normalizedCfg, nil
 }
 
+func makeAbsolutePath(path, description string, logger *slog.Logger) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		logger.Error(
+			"Failed to get absolute path",
+			slog.String("description", description),
+			slog.String("path", path),
+			slog.String("error", err.Error()),
+		)
+		return "", fmt.Errorf("normalize %s %q: %w", description, path, err)
+	}
+
+	return absPath, nil
+}
+
+// getenvOrDefault retrieves an environment variable or returns a default value if empty.
 func getenvOrDefault(getenv func(string) string, key string, defaultValue string) string {
 	value := getenv(key)
 	if value == "" {
 		return defaultValue
 	}
+
 	return value
 }

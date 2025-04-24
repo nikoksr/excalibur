@@ -390,11 +390,6 @@ func compareExcelFiles(t *testing.T, templatePath, expectedPath, actualPath stri
 					continue
 				}
 
-				if cIdx == 0 && rIdx == 0 { // Log only once per sheet if template sheet is missing
-					t.Logf("Skipping style comparison for sheet '%s' as it's not in the template file.", sheetName)
-					continue
-				}
-
 				templateStyleID, err := templateFile.GetCellStyle(sheetName, cellName)
 				if err != nil { // Handle potential errors gracefully
 					t.Logf(
