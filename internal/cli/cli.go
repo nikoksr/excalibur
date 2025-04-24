@@ -107,19 +107,19 @@ func NewApp(version string, runner RunFn) *cli.Command {
 			appConfig.Report.OutputPath = cmd.String("report-output-path")
 			appConfig.Report.Timeout = cmd.Duration("report-timeout")
 
-			// --- Validate Configuration ---
-			logger.Debug("Validating configuration...")
-			if err := config.Validate(ctx, appConfig, logger); err != nil {
-				logger.Error("Configuration validation failed", slog.String("error", err.Error()))
-				return fmt.Errorf("validate configuration: %w", err)
-			}
-
 			// --- Normalize Configuration ---
 			logger.Debug("Normalizing configuration...")
 			normalizedCfg, err := config.Normalize(appConfig, logger)
 			if err != nil {
 				logger.Error("Configuration normalization failed", slog.String("error", err.Error()))
 				return fmt.Errorf("normalize configuration: %w", err)
+			}
+
+			// --- Validate Configuration ---
+			logger.Debug("Validating configuration...")
+			if err := config.Validate(ctx, appConfig, logger); err != nil {
+				logger.Error("Configuration validation failed", slog.String("error", err.Error()))
+				return fmt.Errorf("validate configuration: %w", err)
 			}
 
 			// --- Run Core Application Logic ---
