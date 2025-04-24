@@ -8,17 +8,19 @@ import (
 )
 
 func NewLogger(w io.Writer, verbose bool) *slog.Logger {
-	logLevel := slog.LevelInfo
-	addSource := false
+	var handler slog.Handler = slog.NewTextHandler(w, &slog.HandlerOptions{
+		AddSource: false,
+		Level:     slog.LevelInfo,
+	})
+
 	if verbose {
-		logLevel = slog.LevelDebug
-		addSource = true
+		handler = slog.NewJSONHandler(w, &slog.HandlerOptions{
+			AddSource: true,
+			Level:     slog.LevelDebug,
+		})
 	}
 
-	logger := slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
-		Level:     logLevel,
-		AddSource: addSource,
-	}))
+	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
 	assert.Assert(logger != nil, "logger must not be nil")
