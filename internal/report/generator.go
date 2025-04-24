@@ -18,7 +18,7 @@ import (
 	"github.com/nikoksr/assert-go"
 	"github.com/xuri/excelize/v2"
 
-	"excalibur/internal/datasource"
+	"github.com/nikoksr/excalibur/internal/datasource"
 )
 
 type Generator struct {

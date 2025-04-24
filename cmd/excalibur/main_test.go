@@ -22,7 +22,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/xuri/excelize/v2"
 
-	cliapp "excalibur/internal/cli"
+	cliapp "github.com/nikoksr/excalibur/internal/cli"
 )
 
 const testdataDir = "testdata"

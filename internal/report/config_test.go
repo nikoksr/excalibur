@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"excalibur/internal/report"
+	"github.com/nikoksr/excalibur/internal/report"
 )
 
 func TestReportConfig_Valid(t *testing.T) {

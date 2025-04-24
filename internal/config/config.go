@@ -11,8 +11,8 @@ import (
 
 	"github.com/nikoksr/assert-go"
 
-	"excalibur/internal/datasource"
-	"excalibur/internal/report"
+	"github.com/nikoksr/excalibur/internal/datasource"
+	"github.com/nikoksr/excalibur/internal/report"
 )
 
 type Config struct {

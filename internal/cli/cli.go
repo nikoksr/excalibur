@@ -9,8 +9,8 @@ import (
 	"github.com/nikoksr/assert-go"
 	"github.com/urfave/cli/v3"
 
-	"excalibur/internal/config"
-	"excalibur/internal/logging"
+	"github.com/nikoksr/excalibur/internal/config"
+	"github.com/nikoksr/excalibur/internal/logging"
 )
 
 type RunFn func(ctx context.Context, cfg *config.Config, logger *slog.Logger) error

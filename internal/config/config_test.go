@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"excalibur/internal/config"
-	"excalibur/internal/datasource"
-	"excalibur/internal/report"
+	"github.com/nikoksr/excalibur/internal/config"
+	"github.com/nikoksr/excalibur/internal/datasource"
+	"github.com/nikoksr/excalibur/internal/report"
 )
 
 func TestValidate(t *testing.T) {

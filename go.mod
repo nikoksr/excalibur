@@ -1,4 +1,4 @@
-module excalibur
+module github.com/nikoksr/excalibur
 
 go 1.24.2
 

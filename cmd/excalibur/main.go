@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	cliapp "excalibur/internal/cli"
-	"excalibur/internal/config"
-	"excalibur/internal/datasource"
-	"excalibur/internal/report"
+	cliapp "github.com/nikoksr/excalibur/internal/cli"
+	"github.com/nikoksr/excalibur/internal/config"
+	"github.com/nikoksr/excalibur/internal/datasource"
+	"github.com/nikoksr/excalibur/internal/report"
 )
 
 var version = "dev" // Will be set by the build system

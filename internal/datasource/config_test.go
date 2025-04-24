@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"excalibur/internal/datasource"
+	"github.com/nikoksr/excalibur/internal/datasource"
 )
 
 func TestConfig_Valid(t *testing.T) {

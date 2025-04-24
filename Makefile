@@ -7,7 +7,7 @@ BUILD_DIR := build
 fmt:
 	@gofumpt -w .
 	@golines --ignore-generated --chain-split-dots --reformat-tags --shorten-comments --max-len 120 -w .
-	@gci write -s standard -s default -s "prefix(excalibur)" .
+	@gci write -s standard -s default -s "prefix(github.com/nikoksr/excalibur)" .
 
 lint:
 	@golangci-lint run -c .golangci.yaml --fix ./...
