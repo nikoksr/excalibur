@@ -1,0 +1,43 @@
+project_name: excalibur
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: excalibur
+    main: ./cmd/excalibur/main.go
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=0
+    binary: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: excalibur-archive
+    builds:
+      - excalibur
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github-native
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} {{.Version}}"

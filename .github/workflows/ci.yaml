@@ -1,0 +1,43 @@
+name: CI Checks
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install Formatting Tools
+        run: |
+          go install mvdan.cc/gofumpt@latest
+          go install github.com/segmentio/golines@latest
+          go install github.com/daixiang0/gci@latest
+        shell: bash
+
+      - name: Check Formatting
+        run: |
+          make fmt
+          if ! git diff --quiet; then
+            echo "::error::Go code is not properly formatted. Please run 'make fmt' locally and commit the changes."
+            git diff 
+            exit 1
+          fi
+        shell: bash
+
+      - name: Run Tests
+        run: make test
