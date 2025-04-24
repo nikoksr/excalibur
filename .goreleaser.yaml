@@ -13,7 +13,7 @@ builds:
       - amd64
     env:
       - CGO_ENABLED=0
-    binary: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    binary: "{{ .ProjectName }}"
     ldflags:
       - -s -w -X main.version={{.Version}}
 
@@ -21,7 +21,7 @@ archives:
   - id: excalibur-archive
     builds:
       - excalibur
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     format: tar.gz
     files:
       - LICENSE
