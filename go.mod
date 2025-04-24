@@ -11,7 +11,10 @@ require (
 	github.com/xuri/excelize/v2 v2.9.1-0.20250418115259-55cf0d42a76b
 )
 
-require github.com/google/go-cmp v0.7.0
+require (
+	github.com/google/go-cmp v0.7.0
+	github.com/urfave/cli/v3 v3.2.0
+)
 
 require (
 	dario.cat/mergo v1.0.1 // indirect

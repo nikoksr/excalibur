@@ -165,7 +165,6 @@ func (g *Generator) GenerateReport(ctx context.Context) error {
 		return fmt.Errorf("save generated report file %q: %w", g.config.OutputPath, err)
 	}
 
-	g.logger.Info("Report generation process completed successfully.")
 	return nil
 }
 

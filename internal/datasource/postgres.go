@@ -82,12 +82,7 @@ func (p *PostgresDataSource) FetchData(ctx context.Context, query string) (map[s
 		return nil, errors.New("query must not be empty")
 	}
 
-	// --- SECURITY WARNING ---
-	// Executing raw SQL strings (especially from external files) can be risky.
-	// Ensure the source of SQL files is trusted or implement parameterization/sanitization
-	// if queries could be influenced by untrusted input.
 	p.logger.Debug("Executing query", slog.String("sql", trimmedQuery))
-
 	rows, err := p.pool.Query(ctx, trimmedQuery)
 	if err != nil {
 		p.logger.Error("Failed to execute query", slog.String("sql", trimmedQuery), slog.String("error", err.Error()))

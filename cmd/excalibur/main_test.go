@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -22,6 +21,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/xuri/excelize/v2"
+
+	cliapp "excalibur/internal/cli"
 )
 
 const testdataDir = "testdata"
@@ -32,14 +33,14 @@ func TestExcaliburE2E_Success(t *testing.T) {
 	}
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute) // Shorter timeout might be ok
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 
-	// 1. Setup Test Database (Consider refactoring setup into a helper)
+	// 1. Setup Test Database
 	dbDSN, dbCleanup := setupTestDatabase(ctx, t)
 	defer dbCleanup()
 
-	// 2. Create Temporary Files and Directories for this test
+	// 2. Create Temporary Files and Directories
 	var (
 		testTemplateFileName = filepath.Join(testdataDir, "template.xlsx")
 		testOutputFileName   = filepath.Join(testdataDir, "output.xlsx")
@@ -47,34 +48,33 @@ func TestExcaliburE2E_Success(t *testing.T) {
 	)
 
 	tempBaseDir := t.TempDir()
-
 	templatePath, expectedPath, outputPath := createTestFiles(
 		t,
 		tempBaseDir,
 		testTemplateFileName,
 		testExpectedFileName,
-		testOutputFileName,
+		filepath.Base(testOutputFileName), // Pass only the base name for output
 	)
-	tempQueriesDir := filepath.Join(filepath.Dir(templatePath), "sql") // Assuming sql dir is sibling
+	// Queries dir relative to the *temporary* template path
+	tempQueriesDir := filepath.Join(filepath.Dir(templatePath), "sql")
 
-	// 3. Prepare Arguments and Environment for main.run
+	// 3. Prepare Arguments for app.Run
+	// Use the flag names defined in internal/cli/cli.go
 	args := []string{
-		"-dsn", dbDSN,
-		"-report-template-path", templatePath,
-		"-report-ref-col", "R",
-		"-report-queries-dir", tempQueriesDir,
-		"-report-output-path", outputPath,
-		"-report-timeout", "1m",
+		"excalibur",
+		"--dsn", dbDSN,
+		"--report-template-path", templatePath,
+		"--report-ref-col", "R",
+		"--report-queries-dir", tempQueriesDir,
+		"--report-output-path", outputPath,
+		"--report-timeout", "1m",
+		// "--verbose",
 	}
-	getenv := mockGetenv(make(map[string]string)) // Empty env
-	testLogger := slog.New(
-		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}),
-	) // Info level might be enough
 
-	// 4. Execute the Application Logic via main.run
-	runErr := run(args, getenv, testLogger)
-	// *** Assert NO error for the success case ***
-	require.NoError(t, runErr, "main.run failed unexpectedly")
+	// 4. Create and Execute the CLI Application
+	app := cliapp.NewApp("test-version", runExcalibur)
+	runErr := app.Run(ctx, args)
+	require.NoError(t, runErr, "app.Run failed unexpectedly")
 
 	// 5. Verify Output
 	_, err := os.Stat(outputPath)
@@ -87,7 +87,7 @@ func TestExcaliburE2E_MissingSQLFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping E2E test in short mode")
 	}
-	t.Parallel() // Can run in parallel
+	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
@@ -103,51 +103,39 @@ func TestExcaliburE2E_MissingSQLFile(t *testing.T) {
 	)
 
 	tempBaseDir := t.TempDir()
-	// NOTE: Provide a dummy output file name for validation purposes
 	dummyOutputBaseName := "output_for_failure_test.xlsx"
 	templatePath, _, outputPath := createTestFiles(
 		t,
 		tempBaseDir,
 		testTemplateInvalidPathFileName,
-		"",
+		"", // No expected file needed
 		dummyOutputBaseName,
-	) // Provide dummy output name
+	)
 	tempQueriesDir := filepath.Join(filepath.Dir(templatePath), "sql")
 
-	// 3. Prepare Arguments and Environment
+	// 3. Prepare Arguments
 	args := []string{
-		"-dsn", dbDSN,
-		"-report-template-path", templatePath,
-		"-report-ref-col", "R",
-		"-report-queries-dir", tempQueriesDir,
-		"-report-output-path", outputPath, // outputPath will now be non-empty
-		"-report-timeout", "1m",
+		"excalibur",
+		"--dsn", dbDSN,
+		"--report-template-path", templatePath,
+		"--report-ref-col", "R",
+		"--report-queries-dir", tempQueriesDir,
+		"--report-output-path", outputPath,
+		"--report-timeout", "1m",
+		// "--verbose",
 	}
-	getenv := mockGetenv(make(map[string]string))
-	testLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	// 4. Execute the Application Logic via main.run
-	runErr := run(args, getenv, testLogger)
+	// 4. Create and Execute the CLI Application
+	app := cliapp.NewApp("test-version", runExcalibur)
+	runErr := app.Run(ctx, args)
+	require.Error(t, runErr, "app.Run should have failed due to missing SQL file")
 
-	// *** Assert an ERROR occurs and check its content ***
-	require.Error(t, runErr, "main.run should have failed due to missing SQL file")
-	assert.Contains(t, runErr.Error(), "referenced SQL file not found", "Error message should indicate file not found")
-	assert.Contains(t, runErr.Error(), "invalid_path.sql", "Error message should mention the missing file")
-
-	// 5. Verify Output (Optional: check that the output file was *not* fully created or is incomplete if needed)
-	// For this test, just ensuring the correct error occurred is usually sufficient.
+	require.ErrorContains(t, runErr, "referenced SQL file not found", "Error message should indicate file not found")
+	require.ErrorContains(t, runErr, "invalid_path.sql", "Error message should mention the missing file")
 }
 
 // --- Helper Functions ---
 
-// Mock getenv.
-func mockGetenv(env map[string]string) func(string) string {
-	return func(key string) string {
-		return env[key]
-	}
-}
-
-// createTestFiles: Needs slight modification to handle optional expected/output names.
 func createTestFiles(
 	t *testing.T,
 	tempBaseDir string,
@@ -183,13 +171,13 @@ func createTestFiles(
 	var expectedPath string
 	if expectedSourceBaseName != "" {
 		expectedSourcePath := filepath.Join(sourceTestDataDir, filepath.Base(expectedSourceBaseName))
-		expectedPath = filepath.Join(inputDirAbs, filepath.Base(expectedSourceBaseName)) // Keep near template
+		expectedPath = filepath.Join(inputDirAbs, filepath.Base(expectedSourceBaseName))
 		_, err = os.Stat(expectedSourcePath)
 		require.NoError(t, err, "Ensure expected output file exists at %s", expectedSourcePath)
 		require.NoError(t, copyFileForTest(expectedSourcePath, expectedPath), "Failed to copy expected output file")
 	}
 
-	// --- Define Output Path (Only if provided) ---
+	// --- Define Output Path ---
 	var outputPath string
 	if outputBaseName != "" {
 		outputPath = filepath.Join(outputDirAbs, filepath.Base(outputBaseName))
@@ -229,7 +217,7 @@ func copyFileForTest(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("read file %s: %w", src, err)
 	}
-	err = os.WriteFile(dst, data, 0o644) // Use 0644 for typical file permissions
+	err = os.WriteFile(dst, data, 0o644)
 	if err != nil {
 		return fmt.Errorf("write file %s: %w", dst, err)
 	}

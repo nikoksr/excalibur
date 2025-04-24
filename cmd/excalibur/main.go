@@ -1,10 +1,8 @@
-// nolint: mnd // ...
 package main
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,61 +11,32 @@ import (
 	"syscall"
 	"time"
 
+	cliapp "excalibur/internal/cli"
 	"excalibur/internal/config"
 	"excalibur/internal/datasource"
-	"excalibur/internal/logging"
 	"excalibur/internal/report"
 )
 
+var version = "dev" // Will be set by the build system
+
 func main() {
-	// Initial, minimal flag parsing just to set the log level early.
-	// The main flag parsing happens within run().
-	verbose := flag.Bool("verbose", false, "Enable verbose (debug) logging.")
-	_ = flag.CommandLine.Parse(os.Args[1:])
+	app := cliapp.NewApp(version, runExcalibur)
 
-	logger := logging.NewLogger(os.Stdout, *verbose)
-
-	if err := run(os.Args[1:], os.Getenv, logger); err != nil {
-		if !errors.Is(err, flag.ErrHelp) {
-			logger.Error("Application failed", slog.String("error", err.Error()))
-			os.Exit(1)
-		}
-		os.Exit(0)
+	err := app.Run(context.Background(), os.Args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
 	}
-
-	logger.Debug("Application finished successfully.")
 }
 
-func run(args []string, getenv func(string) string, logger *slog.Logger) error {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+func runExcalibur(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
+	// Context with signal handling for graceful shutdown
+	runCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	logger.Info("Starting Excalibur")
+	logger.Info("Starting Excalibur Core Logic")
 
-	// --- Configuration ---
-	logger.Debug("Loading configuration...")
-	cfgRaw, err := config.Load(args, getenv, logger)
-	if err != nil {
-		if !errors.Is(err, flag.ErrHelp) {
-			logger.Error("Failed to load configuration", slog.String("error", err.Error()))
-		}
-		return err
-	}
-
-	logger.Debug("Validating configuration...")
-	if err = config.Validate(ctx, cfgRaw, logger); err != nil {
-		logger.Error("Configuration validation failed", slog.String("error", err.Error()))
-		return fmt.Errorf("validate config: %w", err)
-	}
-
-	logger.Debug("Normalizing configuration...")
-	cfg, err := config.Normalize(cfgRaw, logger)
-	if err != nil {
-		logger.Error("Configuration normalization failed", slog.String("error", err.Error()))
-		return fmt.Errorf("normalize config: %w", err)
-	}
-
-	logger.Debug("Using normalized configuration",
+	logger.Debug("Using validated and normalized configuration",
 		slog.Group("report",
 			slog.String("template_path", cfg.Report.TemplatePath),
 			slog.String("output_path", cfg.Report.OutputPath),
@@ -79,21 +48,22 @@ func run(args []string, getenv func(string) string, logger *slog.Logger) error {
 			slog.String("dsn_provided", maskDSNPassword(cfg.DataSource.DSN)),
 		),
 	)
-	logger.Debug("Full DSN", slog.String("dsn", cfg.DataSource.DSN)) // Only in verbose mode
+
+	logger.Debug("Full DSN", slog.String("dsn", cfg.DataSource.DSN))
 
 	// --- Datasource Setup ---
 	logger.Info("Initializing data source...")
-	postgresSource, err := datasource.NewPostgresDataSource(ctx, cfg.DataSource, logger)
+	postgresSource, err := datasource.NewPostgresDataSource(runCtx, cfg.DataSource, logger)
 	if err != nil {
 		logger.Error("Failed to initialize data source", slog.String("error", err.Error()))
-		return fmt.Errorf("initialize data source: %w", err)
+		return fmt.Errorf("initialize data source: %w", err) // Return error to CLI Action
 	}
 	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		logger.Debug("Closing data source...")
-		if closeErr := postgresSource.Close(ctx); closeErr != nil {
+		if closeErr := postgresSource.Close(cleanupCtx); closeErr != nil {
 			logger.Warn("Error closing data source", slog.String("error", closeErr.Error()))
-		} else {
-			logger.Debug("Data source closed successfully.")
 		}
 	}()
 
@@ -104,30 +74,37 @@ func run(args []string, getenv func(string) string, logger *slog.Logger) error {
 	logger.Info("Starting report generation...")
 	startTime := time.Now()
 
-	generationCtx, cancelGeneration := context.WithTimeout(ctx, cfg.Report.Timeout)
+	generationCtx, cancelGeneration := context.WithTimeout(runCtx, cfg.Report.Timeout)
 	defer cancelGeneration()
 
 	err = generator.GenerateReport(generationCtx)
+	duration := time.Since(startTime)
+
 	if err != nil {
-		duration := time.Since(startTime)
-		// Handle specific context errors for clearer messages.
 		if errors.Is(err, context.DeadlineExceeded) {
 			errMsg := fmt.Sprintf("report generation timed out after %s", cfg.Report.Timeout)
 			logger.Error(errMsg, slog.Duration("duration", duration))
-			return errors.New(errMsg)
+			return errors.New(errMsg) // Return error to CLI Action
 		}
 		if errors.Is(err, context.Canceled) {
-			// Could be SIGINT/SIGTERM or parent context cancellation.
-			logger.Warn("Report generation cancelled", slog.Duration("duration", duration))
-			return errors.New("report generation cancelled")
+			if errors.Is(runCtx.Err(), context.Canceled) {
+				logger.Warn("Report generation cancelled by signal", slog.Duration("duration", duration))
+				return errors.New("report generation cancelled by signal")
+			}
+
+			logger.Warn(
+				"Report generation cancelled",
+				slog.Duration("duration", duration),
+				slog.String("reason", err.Error()),
+			)
+			return fmt.Errorf("report generation cancelled: %w", err)
 		}
 
 		logger.Error("Report generation failed", slog.String("error", err.Error()), slog.Duration("duration", duration))
-		return fmt.Errorf("report generation: %w", err) // Wrap original error
+		return fmt.Errorf("report generation: %w", err) // Wrap and return original error
 	}
 
 	// --- Success ---
-	duration := time.Since(startTime)
 	logger.Info("Report generated successfully",
 		slog.String("output_path", cfg.Report.OutputPath),
 		slog.Duration("duration", duration),
